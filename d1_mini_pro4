@@ -1,0 +1,148 @@
+############# User configuration #############
+
+substitutions:
+  # WeMos D1 R2 and mini (Microcontroller	ESP8266, Frequency	80MHz, Flash	4MB, RAM	80KB)
+  #board: d1_mini
+  # WeMos D1 mini pro (Microcontroller	ESP8266, Frequency	80MHz, Flash	16MB, RAM	80KB)
+
+
+  # Wifi credentials
+  wifi_ssid: !secret wifi_ssid
+  wifi_password: !secret wifi_pass
+  ap_ssid: "d1_mini_4"
+  ap_password: "1234567890"
+
+  # OTA and API
+  ota_password: "esphome"
+  api_password: "esphome"
+
+  # Порог срабатывания счетчика по уровню освещенности
+  illuminanceThreshold: '20.0'
+  pulse_rate: '4000' # imp/kWh
+
+
+
+########### End user configuration ###########
+
+
+esphome:
+  name: d1-mini-4
+  platform: ESP8266
+  board: d1_mini
+
+wifi:
+  ssid: $wifi_ssid
+  password: $wifi_password
+  fast_connect: on
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: $ap_ssid
+    password: $ap_password
+
+captive_portal:
+
+# Enable logging
+logger:
+# Home Assistant API
+api:
+  password: $api_password
+  
+ota:
+  password: $ota_password
+
+
+#Добавляем веб-сервер
+web_server:
+  port: 80
+
+
+
+globals:
+  - id: gl_impulse_counter
+    type: float
+    restore_value: false
+    initial_value: '0'
+
+
+
+switch:
+  - platform: gpio
+    name: "rled_switch"
+    pin: D5
+    id: relayd5
+
+  - platform: template
+    name: "impulseDetected"
+    id: impulse_detected
+    lambda: |-
+      if ( id(temt6000).state - id(temt6000_old).state > $illuminanceThreshold ) {
+        id(temt6000_old).publish_state(id(temt6000).state);
+        return true;
+      } else {
+        id(temt6000_old).publish_state(id(temt6000).state);
+        return false; 
+      }
+    on_turn_on:
+      then:
+        - lambda: |-
+            id(gl_impulse_counter) += 1;
+#      - number.set:
+#          id: impulse_counter
+#          value: !lambda |-
+#            return id(impulse_counter).state + 1;
+
+
+sensor:
+  - platform: homeassistant
+    name: "Temperature Sensor From Home Assistant"
+    id: flash_light
+    entity_id: input_number.test6
+
+
+  - platform: adc
+    pin: A0
+    name: "TEMT6000 Illuminance"
+    id: temt6000
+    device_class: illuminance
+    unit_of_measurement: lx
+    update_interval: 200ms
+    filters:
+      - lambda: |-
+          return (x / 10000.0) * 2000000.0;
+#    on_value_range:
+#      - above: 20.0 #illuminanceThreshold
+#        below: 50.0
+#        then:
+#          - switch.turn_on: impulse_detected
+#      - above: 50.0 #illuminanceThreshold
+#      - below: 20.0    
+#        then:
+#          - switch.turn_off: impulse_detected
+
+
+  - platform: template
+    name: "Impulse counter old"
+    id: temt6000_old
+#    lambda: |-
+#      on_turn_on: impulse_detected
+#      then:
+#        - lambda: |-
+#            id(gl_impulse_counter) += 1;
+       
+#      return id(gl_impulse_counter);
+    update_interval: 200ms
+
+
+  - platform: template
+    name: "Impulse counter"
+    unit_of_measurement: 'kWh'
+    state_class: measurement
+    device_class: power
+    icon: mdi:flash-outline
+    accuracy_decimals: 0
+    update_interval: 1s
+    lambda: |-
+      return id(gl_impulse_counter);
+    filters:
+      - lambda: return x * ( 1.0 / $pulse_rate );
